@@ -37,11 +37,6 @@ patients.describe()
 patients.shape  #(112120, 12)
 patients.dtypes     #object, int64, float64
 
-#Find unique diagnoses
-unique_labels = patients['finding_labels'].unique()
-print("Unique diagnoses in 'finding_labels':")
-print(unique_labels)
-
 #Remove NA's
 patients.isnull()   #Find missing values in data set
 patients = patients.dropna()    #Drop Null values and update df
