@@ -1,6 +1,7 @@
 Clean the data
 Merge datasets
 Don't need to cluster because of Finding Labels column
+Aim for 80 ISH epochs train under 10-20
 One layer for the linear information 
 One layer for the images
 test model 
