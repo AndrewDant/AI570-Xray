@@ -33,23 +33,10 @@ patients = pd.read_csv("Data_Entry_2017.csv")
 
 #Data Exploration
 patients.head()
+patients.columns
 patients.describe()
 patients.shape  #(112120, 12)
 patients.dtypes     #object, int64, float64
-
-#Find unique diagnoses
-unique_labels = patients['finding_labels'].unique()
-print("Unique diagnoses in 'finding_labels':")
-print(unique_labels)
-
-#Remove NA's
-patients.isnull()   #Find missing values in data set
-patients = patients.dropna()    #Drop Null values and update df
-
-patients.describe()
-
-#Find duplicate values
-patients.duplicated().sum()     #No duplicates
 
 # Clean column names
 patients.columns = (
@@ -63,14 +50,29 @@ patients.columns = (
 print("Cleaned column names:")
 print(patients.columns)
 
+patients.drop('unnamed_11', axis=1, inplace=True)
+
+#Find unique diagnoses
+unique_labels = patients['finding_labels'].unique()
+print("Unique diagnoses in 'finding_labels':")
+print(unique_labels)
+
+print(patients)
+
+#Remove NA's
+patients.isnull()   #Find missing values in data set
+patients = patients.dropna()    #Drop Null values and update df
+
+patients.describe()
+
+#Find duplicate values
+patients.duplicated().sum()     #No duplicates
+
 # Factorize categorical columns in the DataFrame
 for column in patients.select_dtypes(include=['object']).columns:
     patients['finding_labels'], unique = pd.factorize(patients['finding_labels'])
 print("Cleaned column names:")
 print(patients.columns)
-
-#test this 
-print(patients.dtypes)
 
 #Correlation
 numeric_patients = patients.select_dtypes(include=[np.number])
@@ -213,4 +215,5 @@ plt.legend(loc='upper right')
 
 plt.tight_layout()
 plt.show()
+
 
