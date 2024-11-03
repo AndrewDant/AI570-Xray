@@ -52,12 +52,27 @@ print(patients.columns)
 
 patients.drop('unnamed_11', axis=1, inplace=True)
 
-#Find unique diagnoses
-unique_labels = patients['finding_labels'].unique()
-print("Unique diagnoses in 'finding_labels':")
-print(unique_labels)
+# determine the set of unique interests
+finding_set = set()
+for finding_list in patients['finding_labels'].tolist():
+    for finding in finding_list.split('|'):
+        finding_set.add(finding)
+        
+print(f'Unique diagnoses in "finding_labels": {sorted(finding_set)}')
 
-print(patients)
+# build the columns and rows of the dummy variables
+dummy_finding_variables = []
+for finding_list in patients['finding_labels'].tolist():
+    dummy_finding_variables.append([1 if finding in finding_list.split('|') else 0 for finding in finding_set])
+
+dummy_finding_variables = pd.DataFrame(dummy_finding_variables, columns=[finding for finding in finding_set])
+
+# replace the old finding labels column with the dummy variables
+patients.drop('finding_labels', axis=1, inplace=True)
+patients = patients.join(dummy_finding_variables)
+patients.dtypes
+
+print(patients.iloc[:, -15:])
 
 #Remove NA's
 patients.isnull()   #Find missing values in data set
@@ -67,12 +82,6 @@ patients.describe()
 
 #Find duplicate values
 patients.duplicated().sum()     #No duplicates
-
-# Factorize categorical columns in the DataFrame
-for column in patients.select_dtypes(include=['object']).columns:
-    patients['finding_labels'], unique = pd.factorize(patients['finding_labels'])
-print("Cleaned column names:")
-print(patients.columns)
 
 #Correlation
 numeric_patients = patients.select_dtypes(include=[np.number])
