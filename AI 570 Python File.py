@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import os
 
 #Upload the CSV file
-path = r"D:\Penn State\AI 570\Data\Project"
+path = r"C:\Users\andrew.dant\Downloads\archive"
 os.chdir(path)
 patients = pd.read_csv("Data_Entry_2017.csv")
 
@@ -107,8 +107,6 @@ if not numeric_patients.empty:
     # Scale the data
     scaler = MinMaxScaler()
     x = scaler.fit_transform(numeric_patients)  # Scale only numeric data
-    # Ensure finding_labels is encoded properly
-    patients['finding_labels'], unique = pd.factorize(patients['finding_labels'])
     y = patients['finding_labels']  # Use encoded labels
 else:
     print("No numeric columns available for scaling.")
@@ -117,6 +115,8 @@ else:
 
 # Filter the DataFrame for existing images
 patients_with_images = patients[patients['image_file_name'].isin(os.listdir(r'D:\Penn State\AI 570\Data\Project\archive'))]
+
+patients_with_images
 
 # Split into training and testing sets (70:30)
 train_df, test_df = train_test_split(patients_with_images, test_size=0.3, random_state=42)
