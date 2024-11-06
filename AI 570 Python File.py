@@ -32,11 +32,16 @@ os.chdir(path)
 patients = pd.read_csv("Data_Entry_2017.csv")
 
 #Data Exploration
-patients.head()
-patients.columns
-patients.describe()
-patients.shape  #(112120, 12)
-patients.dtypes     #object, int64, float64
+print(patients.head())
+print(patients.columns)
+print(patients.describe())
+print(patients.shape)  #(112120, 12)
+print(patients.dtypes)     #object, int64, float64
+
+
+# TODO encode ordinal variables like gender and view position, remove variables like id and original image width from x
+print(patients['View Position'].unique())
+print(patients['Patient Gender'].unique())
 
 # Clean column names
 patients.columns = (
@@ -49,6 +54,7 @@ patients.columns = (
 
 print("Cleaned column names:")
 print(patients.columns)
+
 
 patients.drop('unnamed_11', axis=1, inplace=True)
 
@@ -74,21 +80,27 @@ patients.dtypes
 
 print(patients.iloc[:, -15:])
 
+
 #Remove NA's
 patients.isnull()   #Find missing values in data set
 patients = patients.dropna()    #Drop Null values and update df
 
 patients.describe()
 
+
 #Find duplicate values
 patients.duplicated().sum()     #No duplicates
 
+
+
 #Correlation
-numeric_patients = patients.select_dtypes(include=[np.number])
+# columns with a numeric datatype, other than the new dummy variables for encoding classes
+numeric_patients = patients.iloc[:, : -15].select_dtypes(include=[np.number])
 if not numeric_patients.empty:
     print(numeric_patients.corr())
 else:
     print("No numeric columns to compute correlation.")     #No numeric columns to compute correlation.
+
 
 #Scatterplot matrix
 if not numeric_patients.empty and not numeric_patients.isnull().all(axis=0).any():
@@ -96,6 +108,7 @@ if not numeric_patients.empty and not numeric_patients.isnull().all(axis=0).any(
     plt.show()
 else:
     print("No valid numeric data available for scatter matrix.")    #No valid numeric data available for scatter matrix.
+
 
 #Scale the data
 scaler = MinMaxScaler()
@@ -107,16 +120,18 @@ if not numeric_patients.empty:
     # Scale the data
     scaler = MinMaxScaler()
     x = scaler.fit_transform(numeric_patients)  # Scale only numeric data
-    y = patients['finding_labels']  # Use encoded labels
 else:
     print("No numeric columns available for scaling.")
+
+patients
 
 #begin merging the dataset 
 
 # Filter the DataFrame for existing images
-patients_with_images = patients[patients['image_file_name'].isin(os.listdir(r'D:\Penn State\AI 570\Data\Project\archive'))]
+patients_with_images = patients[patients['image_index'].isin(os.listdir(path))]
 
 patients_with_images
+
 
 # Split into training and testing sets (70:30)
 train_df, test_df = train_test_split(patients_with_images, test_size=0.3, random_state=42)
@@ -128,7 +143,7 @@ test_datagen = ImageDataGenerator(rescale=1./255)
 # Create data generators
 train_generator = train_datagen.flow_from_dataframe(
     dataframe=train_df,
-    directory=r'D:\Penn State\AI 570\Data\Project\archive',
+    directory=path,
     x_col='image_file_name',
     y_col='finding_labels',
     target_size=(150, 150),
@@ -138,7 +153,7 @@ train_generator = train_datagen.flow_from_dataframe(
 
 test_generator = test_datagen.flow_from_dataframe(
     dataframe=test_df,
-    directory=r'D:\Penn State\AI 570\Data\Project\archive',
+    directory=path,
     x_col='image_file_name',
     y_col='finding_labels',
     target_size=(150, 150),
@@ -146,6 +161,7 @@ test_generator = test_datagen.flow_from_dataframe(
     class_mode='categorical',
     shuffle=False  # Keep the order for testing
 )
+
 
 #Build the model
 model = Sequential([
