@@ -129,6 +129,7 @@ image_dataset = tf.keras.preprocessing.image_dataset_from_directory(
     directory=path,
     labels=None,
     image_size=(224, 224),  # all images are resized to this size. Should match model's expectations
+    batch_size=None
 )
 
 
@@ -136,6 +137,7 @@ image_dataset = tf.keras.preprocessing.image_dataset_from_directory(
 patients = patients.set_index("image_index")
 patients = patients.loc[[path.split("\\")[-1] for path in image_dataset.file_paths]]
 dataset_length = len(patients)
+
 
 # Convert feature and label data to TensorFlow datasets
 features_dataset = tf.data.Dataset.from_tensor_slices(patients[feature_columns].values)
@@ -151,6 +153,10 @@ test_size = dataset_length - train_size
 
 train_dataset = combined_dataset.take(train_size)
 test_dataset = combined_dataset.skip(test_size)
+
+batch_size = 32
+train_dataset = train_dataset.batch(batch_size)
+test_dataset = test_dataset.batch(batch_size)
 from keras.applications.resnet import ResNet50, preprocess_input
 from keras.layers import Dense, GlobalAveragePooling2D, Input, Conv2D, MaxPooling2D, Flatten, Concatenate
 from keras.utils import plot_model
