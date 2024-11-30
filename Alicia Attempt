@@ -1,0 +1,288 @@
+### Andrew Dant & Alicia Hernandez
+### AI 570
+### Professor Wang
+### Chest X-Ray Project
+
+#Libraries and stuff
+import numpy as np
+import pandas as pd
+from pandas.plotting import scatter_matrix
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.utils import load_img, img_to_array
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import classification_report
+from tensorflow.keras.callbacks import EarlyStopping
+from keras.applications.resnet import ResNet50, preprocess_input
+from keras.layers import Dense, GlobalAveragePooling2D, Input, Conv2D, MaxPooling2D, Flatten, Concatenate
+from keras.utils import plot_model
+from tensorflow.keras.applications import ResNet50
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import (
+    Dense, GlobalAveragePooling2D, Input, Concatenate, Flatten, BatchNormalization, Dropout
+)
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping
+from keras.optimizers import Adam
+import glob
+import matplotlib.pyplot as plt
+import os
+
+#Upload the CSV file
+path = r"D:\Penn State\AI 570\Data\Project"
+os.chdir(path)
+patients = pd.read_csv("Data_Entry_2017.csv")
+
+#Data Exploration
+print(patients.head())
+print(patients.columns)
+print(patients.describe())
+print(patients.shape)  #(112120, 12)
+print(patients.dtypes)     #object, int64, float64
+
+print(patients['Patient Gender'].unique())
+# encode patient gender as zero or one
+patients['Patient Gender'] = patients['Patient Gender'].map({'M': 0, 'F': 1})
+print(patients['View Position'].unique())
+# encode patient gender as zero or one
+patients['View Position'] = patients['View Position'].map({'PA': 0, 'AP': 1})
+# empty/fake column caused by a trailing comma in the CSV file
+columns_to_drop = ['Unnamed: 11']
+all_patient_data_columns = patients
+patients = patients.drop(columns=columns_to_drop)
+
+# Clean column names
+patients.columns = (
+    patients.columns
+    .str.lower()               # Convert to lowercase
+    .str.replace(' ', '_')     # Replace spaces with underscores
+    .str.replace(r'[^a-zA-Z0-9_]', '', regex=True)  # Remove special characters
+    .str.strip()               # Strip whitespace
+)
+
+print("Cleaned column names:")
+print(patients.columns)
+
+feature_columns = ['patient_age', 'patient_gender', 'view_position']
+print(patients[feature_columns].head())
+# determine the set of unique interests
+finding_set = set()
+for finding_list in patients['finding_labels'].tolist():
+    for finding in finding_list.split('|'):
+        finding_set.add(finding)
+        
+print(f'Unique diagnoses in "finding_labels": {sorted(finding_set)}')
+
+label_columns = [finding for finding in finding_set]
+
+# build the columns and rows of the dummy variables
+dummy_finding_variables = []
+for finding_list in patients['finding_labels'].tolist():
+    dummy_finding_variables.append([1 if finding in finding_list.split('|') else 0 for finding in finding_set])
+
+dummy_finding_variables = pd.DataFrame(dummy_finding_variables, columns=label_columns)
+
+# replace the old finding labels column with the dummy variables
+patients.drop('finding_labels', axis=1, inplace=True)
+patients = patients.join(dummy_finding_variables)
+patients.dtypes
+
+print(patients.iloc[:, -15:])
+
+
+
+#Remove NA's
+patients.isnull()   #Find missing values in data set
+patients = patients.dropna()    #Drop Null values and update df
+
+patients.describe()
+
+
+#Find duplicate values
+patients.duplicated().sum()     #No duplicates
+
+
+patients[feature_columns]
+
+#Correlation
+# columns with a numeric datatype, other than the new dummy variables for encoding classes
+numeric_features_patients = patients[feature_columns].select_dtypes(include=[np.number])
+if not numeric_features_patients.empty:
+    print(numeric_features_patients.corr())
+else:
+    print("No numeric columns to compute correlation.")     #No numeric columns to compute correlation.
+
+
+#Scatterplot matrix
+if not numeric_features_patients.empty and not numeric_features_patients.isnull().all(axis=0).any():
+    pd.plotting.scatter_matrix(numeric_features_patients, figsize=(20, 20))
+    plt.show()
+else:
+    print("No valid numeric data available for scatter matrix.")    #No valid numeric data available for scatter matrix.
+
+patients['patient_age']
+#Scale the data
+scaler = MinMaxScaler()
+patients[numeric_features_patients.columns] = scaler.fit_transform(patients[numeric_features_patients.columns])
+patients.head()
+file_names = []
+for root, dirs, files in os.walk(path):
+    file_names.extend([filename for filename in files if '.png' in filename])
+    
+print(len(file_names))  # the number of image files should match the number of rows in patients
+
+# Filter the DataFrame for existing images
+patients_with_images = patients[patients['image_index'].isin(file_names)]
+
+print(patients_with_images.describe())
+
+# Define preprocess_image
+def preprocess_image(image):
+    image = tf.cast(image, tf.float32)  # Convert to float32
+    image = preprocess_input(image)    # ResNet50-specific preprocessing
+    return image
+
+# Get all image file paths
+image_file_paths = glob.glob(r'D:\Penn State\AI 570\Data\Project\archive\**\*.png', recursive=True)
+
+matches = [
+    os.path.basename(path) in patients_with_images['image_index'].values
+    for path in image_file_paths
+]
+print(f"First 5 matches: {matches[:5]}")
+print(f"Number of matches: {sum(matches)}")
+
+# Extract file names from file paths
+patients_with_images['image_index'] = patients_with_images['image_index'].astype(str).str.strip()
+image_file_names = [os.path.basename(path) for path in image_file_paths]
+
+print(f"Number of files found: {len(image_file_paths)}")
+print(image_file_paths[:5]) 
+
+image_file_paths = glob.glob(r'D:\Penn State\AI 570\Data\Project\archive\**\*.png', recursive=True)
+
+image_paths_filtered = [
+    path for path in image_file_paths if os.path.basename(path) in patients_with_images['image_index'].values
+]
+print(f"Number of filtered image paths (final): {len(image_paths_filtered)}")   #Number of matches: 112120
+
+# Function to load images
+def load_image(file_path):
+    img = load_img(file_path, target_size=(224, 224))  # Resize images to 224x224
+    img_array = img_to_array(img)
+    return preprocess_input(img_array)
+
+def combined_data_generator(image_paths, numerical_data, labels, batch_size):
+    while True:
+        for i in range(0, len(image_paths), batch_size):
+            batch_paths = image_paths[i:i+batch_size]
+            batch_numerical = numerical_data[i:i+batch_size]
+            batch_labels = labels[i:i+batch_size]
+            batch_images = np.array([load_image(path) for path in batch_paths])
+            yield [batch_images, batch_numerical], batch_labels
+
+# Create a dataset of image arrays
+image_paths_filtered = [path for path in image_file_paths if os.path.basename(path) in patients_with_images['image_index'].values]
+
+
+print(f"Number of filtered image paths: {len(image_paths_filtered)}")
+print(patients_with_images['image_index'].head())  
+print(image_file_names[:5])
+
+# Convert features and labels to NumPy arrays
+features_data = patients_with_images[feature_columns].values
+labels_data = patients_with_images[label_columns].values
+
+# Function to preprocess images using TensorFlow
+def preprocess_image_tf(file_path):
+    img = tf.io.read_file(file_path)  # Read image file
+    img = tf.image.decode_png(img, channels=3)  # Decode PNG image
+    img = tf.image.resize(img, [224, 224])  # Resize to 224x224
+    img = preprocess_input(img)  # ResNet50 preprocessing
+    return img
+
+# TensorFlow Dataset for images
+image_dataset = tf.data.Dataset.from_tensor_slices(image_paths_filtered)
+image_dataset = image_dataset.map(preprocess_image_tf, num_parallel_calls=tf.data.AUTOTUNE)
+
+# Dataset for numerical features
+numerical_dataset = tf.data.Dataset.from_tensor_slices(features_data)
+
+# Dataset for labels
+label_dataset = tf.data.Dataset.from_tensor_slices(labels_data)
+
+# Combine all datasets into a single dataset
+combined_dataset = tf.data.Dataset.zip(((image_dataset, numerical_dataset), label_dataset))
+
+# Shuffle and split the dataset into training and validation sets
+train_size = int(0.7 * len(patients_with_images))
+train_dataset = combined_dataset.take(train_size)
+val_dataset = combined_dataset.skip(train_size)
+
+# Batch the datasets
+batch_size = 32
+train_dataset = train_dataset.shuffle(buffer_size=1000).batch(batch_size).prefetch(tf.data.AUTOTUNE)
+val_dataset = val_dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+
+# Define the EarlyStopping callback
+early_stopping = EarlyStopping(
+    monitor='val_loss',
+    patience=3,
+    restore_best_weights=True
+)
+
+# Load and freeze the ResNet50 base model
+base_model = ResNet50(weights="imagenet", include_top=False, input_shape=(224, 224, 3))
+for layer in base_model.layers:
+    layer.trainable = False
+
+# Image feature extraction path
+image_input = base_model.input
+x = base_model.output
+x = GlobalAveragePooling2D()(x)
+x = BatchNormalization()(x)
+x = Dense(128, activation="relu")(x)
+x = Dropout(0.3)(x)
+x = Dense(64, activation="relu")(x)
+
+# Numerical feature input path
+patient_input = Input(shape=(len(feature_columns),), name="patient_input")
+y = Dense(16, activation="relu")(patient_input)
+y = BatchNormalization()(y)
+
+# Merge image and numerical features
+combined = Concatenate()([x, y])
+
+# Fully connected layers for the merged path
+z = Dense(64, activation="relu")(combined)
+z = Dropout(0.3)(z)
+z = Dense(32, activation="relu")(z)
+
+# Output layer for multi-label classification
+num_labels = len(label_columns)
+output = Dense(num_labels, activation="sigmoid")(z)
+
+# Define and compile the model
+model = Model(inputs=[image_input, patient_input], outputs=output)
+model.compile(
+    optimizer=Adam(learning_rate=1e-4),
+    loss="binary_crossentropy",
+    metrics=["accuracy"]
+)
+
+# Print a summary of the optimized model
+model.summary()
+
+# Train the model
+history = model.fit(
+    train_dataset,
+    validation_data=val_dataset,
+    epochs=10,
+    callbacks=[early_stopping]
+)
+
+# Evaluate the model
+test_loss, test_accuracy = model.evaluate(val_dataset)
+print(f"Test Loss: {test_loss:.4f}")
+print(f"Test Accuracy: {test_accuracy:.4f}")
