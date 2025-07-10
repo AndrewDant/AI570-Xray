@@ -11,6 +11,7 @@ import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.utils import load_img, img_to_array
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report
 from tensorflow.keras.callbacks import EarlyStopping
 from keras.applications.resnet import ResNet50, preprocess_input
@@ -22,6 +23,10 @@ from tensorflow.keras.layers import (
     Dense, GlobalAveragePooling2D, Input, Concatenate, Flatten, BatchNormalization, Dropout
 )
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import precision_score
+from sklearn.svm import SVC
+from sklearn.metrics import classification_report, accuracy_score
+from sklearn.pipeline import make_pipeline
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
 from keras.optimizers import Adam
@@ -30,7 +35,7 @@ import matplotlib.pyplot as plt
 import os
 
 #Upload the CSV file
-path = r"C:\Users\andrew.dant\Downloads\archive"
+path = r"D:\Penn State\AI 570\Data\Project"
 os.chdir(path)
 patients = pd.read_csv("Data_Entry_2017.csv")
 
@@ -137,8 +142,21 @@ patients_with_images = patients[patients['image_index'].isin(file_names)]
 
 print(patients_with_images.describe())
 
+# Define preprocess_image
+def preprocess_image(image):
+    image = tf.cast(image, tf.float32)  # Convert to float32
+    image = preprocess_input(image)    # ResNet50-specific preprocessing
+    return image
+
 # Get all image file paths
-image_file_paths = glob.glob(r'C:\Users\andrew.dant\Downloads\archive\**\*.png', recursive=True)
+image_file_paths = glob.glob(r'D:\Penn State\AI 570\Data\Project\archive\**\*.png', recursive=True)
+
+matches = [
+    os.path.basename(path) in patients_with_images['image_index'].values
+    for path in image_file_paths
+]
+print(f"First 5 matches: {matches[:5]}")
+print(f"Number of matches: {sum(matches)}")
 
 # Extract file names from file paths
 patients_with_images['image_index'] = patients_with_images['image_index'].astype(str).str.strip()
@@ -146,6 +164,8 @@ image_file_names = [os.path.basename(path) for path in image_file_paths]
 
 print(f"Number of files found: {len(image_file_paths)}")
 print(image_file_paths[:5]) 
+
+image_file_paths = glob.glob(r'D:\Penn State\AI 570\Data\Project\archive\**\*.png', recursive=True)
 
 image_paths_filtered = [
     path for path in image_file_paths if os.path.basename(path) in patients_with_images['image_index'].values
@@ -158,6 +178,20 @@ def load_image(file_path):
     img_array = img_to_array(img)
     return preprocess_input(img_array)
 
+def combined_data_generator(image_paths, numerical_data, labels, batch_size):
+    while True:
+        for i in range(0, len(image_paths), batch_size):
+            batch_paths = image_paths[i:i+batch_size]
+            batch_numerical = numerical_data[i:i+batch_size]
+            batch_labels = labels[i:i+batch_size]
+            batch_images = np.array([load_image(path) for path in batch_paths])
+            yield [batch_images, batch_numerical], batch_labels
+
+# Create a dataset of image arrays
+image_paths_filtered = [path for path in image_file_paths if os.path.basename(path) in patients_with_images['image_index'].values]
+
+
+print(f"Number of filtered image paths: {len(image_paths_filtered)}")
 print(patients_with_images['image_index'].head())  
 print(image_file_names[:5])
 
@@ -186,15 +220,42 @@ label_dataset = tf.data.Dataset.from_tensor_slices(labels_data)
 # Combine all datasets into a single dataset
 combined_dataset = tf.data.Dataset.zip(((image_dataset, numerical_dataset), label_dataset))
 
+batch_size = 32
+
+# Limit the dataset to 25,000 random observations
+sample_size = 25000
+patients_with_images_sampled = patients_with_images.sample(n=sample_size, random_state=42)
+
+# Filter the image paths accordingly
+image_paths_filtered_sampled = [
+    path for path in image_paths_filtered if os.path.basename(path) in patients_with_images_sampled['image_index'].values
+]
+
+# Convert features and labels to NumPy arrays
+features_data_sampled = patients_with_images_sampled[feature_columns].values
+labels_data_sampled = patients_with_images_sampled[label_columns].values
+
+# TensorFlow Dataset for images
+image_dataset_sampled = tf.data.Dataset.from_tensor_slices(image_paths_filtered_sampled)
+image_dataset_sampled = image_dataset_sampled.map(preprocess_image_tf, num_parallel_calls=tf.data.AUTOTUNE)
+
+# Dataset for numerical features
+numerical_dataset_sampled = tf.data.Dataset.from_tensor_slices(features_data_sampled)
+
+# Dataset for labels
+label_dataset_sampled = tf.data.Dataset.from_tensor_slices(labels_data_sampled)
+
+# Combine sampled datasets
+combined_dataset_sampled = tf.data.Dataset.zip(((image_dataset_sampled, numerical_dataset_sampled), label_dataset_sampled))
+
 # Shuffle and split the dataset into training and validation sets
-train_size = int(0.7 * len(patients_with_images))
-train_dataset = combined_dataset.take(train_size)
-val_dataset = combined_dataset.skip(train_size)
+train_size_sampled = int(0.7 * sample_size)
+train_dataset_sampled = combined_dataset_sampled.take(train_size_sampled)
+val_dataset_sampled = combined_dataset_sampled.skip(train_size_sampled)
 
 # Batch the datasets
-batch_size = 32
-train_dataset = train_dataset.shuffle(buffer_size=1000).batch(batch_size).prefetch(tf.data.AUTOTUNE)
-val_dataset = val_dataset.batch(batch_size).prefetch(tf.data.AUTOTUNE)
+train_dataset = train_dataset_sampled.shuffle(buffer_size=1000).batch(batch_size).prefetch(tf.data.AUTOTUNE)
+val_dataset = val_dataset_sampled.batch(batch_size).prefetch(tf.data.AUTOTUNE)
 
 # Define the EarlyStopping callback
 early_stopping = EarlyStopping(
@@ -202,89 +263,103 @@ early_stopping = EarlyStopping(
     patience=3,
     restore_best_weights=True
 )
+#Multi-Branch Neural Network Code ============================================================
+from tensorflow.keras.layers import Input, Dense, Flatten, Dropout, Concatenate, BatchNormalization
+from tensorflow.keras.models import Model
+from tensorflow.keras.applications import Xception
+from tensorflow.keras.optimizers import Adam
 
-# Load and freeze the ResNet50 base model
-base_model = ResNet50(weights="imagenet", include_top=False, input_shape=(224, 224, 3))
-for layer in base_model.layers:
-    layer.trainable = False
+# Define the input shapes for image and numerical data
+image_input_shape = (224, 224, 3)
+numerical_input_shape = (len(feature_columns),)
 
-# Image feature extraction path
-image_input = base_model.input
+# Image Branch
+image_input = Input(shape=image_input_shape, name="image_input")
+base_model = Xception(weights="imagenet", include_top=False, input_tensor=image_input)
 x = base_model.output
-x = GlobalAveragePooling2D()(x)
-x = BatchNormalization()(x)
-x = Dense(128, activation="relu")(x)
-x = Dropout(0.3)(x)
-x = Dense(64, activation="relu")(x)
+x = Flatten()(x)
+x = Dense(256, activation="relu")(x)
+x = Dropout(0.5)(x)
+image_branch_output = BatchNormalization()(x)
 
-# Numerical feature input path
-patient_input = Input(shape=(len(feature_columns),), name="patient_input")
-y = Dense(16, activation="relu")(patient_input)
-y = BatchNormalization()(y)
+# Numerical Branch
+numerical_input = Input(shape=numerical_input_shape, name="numerical_input")
+y = Dense(128, activation="relu")(numerical_input)
+y = Dropout(0.3)(y)
+numerical_branch_output = BatchNormalization()(y)
 
-# Merge image and numerical features
-combined = Concatenate()([x, y])
-
-# Fully connected layers for the merged path
-z = Dense(64, activation="relu")(combined)
+# Concatenate Branches
+merged = Concatenate()([image_branch_output, numerical_branch_output])
+z = Dense(128, activation="relu")(merged)
 z = Dropout(0.3)(z)
-z = Dense(32, activation="relu")(z)
+z = Dense(len(label_columns), activation="sigmoid")(z)  # Multi-label classification output
 
-# Output layer for multi-label classification
-num_labels = len(label_columns)
-output = Dense(num_labels, activation="sigmoid")(z)
+# Create the model
+model = Model(inputs=[image_input, numerical_input], outputs=z)
 
-# Define and compile the model
-model = Model(inputs=[image_input, patient_input], outputs=output)
+# Ensure the model tracks accuracy during training
 model.compile(
-    optimizer=Adam(learning_rate=1e-4),
-    loss="binary_crossentropy",
-    metrics=["accuracy"]
+    optimizer=Adam(learning_rate=0.0001),
+    loss="binary_crossentropy",  # Suitable for multi-label classification
+    metrics=["accuracy"]  # Add precision metric if using Keras' built-in metrics
 )
-
-# Print a summary of the optimized model
-model.summary()
 
 # Train the model
 history = model.fit(
     train_dataset,
     validation_data=val_dataset,
-    epochs=10,
+    epochs=5,
     callbacks=[early_stopping]
 )
 
-# Evaluate the model
-test_loss, test_accuracy = model.evaluate(val_dataset)
-print(f"Test Loss: {test_loss:.4f}")
-print(f"Test Accuracy: {test_accuracy:.4f}")
-
-history_dict = history.history
-train_loss = history_dict['loss']
-val_loss = history_dict['val_loss']
-train_accuracy = history_dict['accuracy']
-val_accuracy = history_dict['val_accuracy']
+# Extract metrics from history
+train_loss = history.history['loss']
+val_loss = history.history['val_loss']
+train_accuracy = history.history['accuracy']
+val_accuracy = history.history['val_accuracy']
 
 # Plot Loss
-plt.figure(figsize=(12, 6))
+plt.figure(figsize=(18, 6))
 
-# Loss Plot
-plt.subplot(1, 2, 1)
+plt.subplot(1, 3, 1)
 plt.plot(train_loss, label='Training Loss')
 plt.plot(val_loss, label='Validation Loss')
-plt.title('Training and Validation Loss')
+plt.title('Loss Over Epochs')
 plt.xlabel('Epochs')
 plt.ylabel('Loss')
 plt.legend()
 
 # Plot Accuracy
-plt.subplot(1, 2, 2)
+plt.subplot(1, 3, 2)
 plt.plot(train_accuracy, label='Training Accuracy')
 plt.plot(val_accuracy, label='Validation Accuracy')
-plt.title('Training and Validation Accuracy')
+plt.title('Accuracy Over Epochs')
 plt.xlabel('Epochs')
 plt.ylabel('Accuracy')
 plt.legend()
 
-# Show the plots
+# Calculate precision for validation set
+def calculate_precision(model, dataset):
+    true_labels = []
+    predictions = []
+    for (image_batch, numerical_batch), label_batch in dataset:
+        preds = model.predict([image_batch, numerical_batch]) > 0.5  # Binary threshold
+        predictions.extend(preds)
+        true_labels.extend(label_batch.numpy())
+    precision = precision_score(
+        np.vstack(true_labels), np.vstack(predictions), average='micro'
+    )
+    return precision
+
+precision_val = calculate_precision(model, val_dataset)
+
+# Precision plot (Static value for now)
+plt.subplot(1, 3, 3)
+plt.bar(['Validation Precision'], [precision_val])
+plt.ylim(0, 1)
+plt.title('Precision on Validation Set')
+plt.ylabel('Precision')
+
+# Show all plots
 plt.tight_layout()
 plt.show()
